@@ -36,8 +36,8 @@ The ID to volume name table is simply a vector of strings. The index of the stri
 There are several problems with this old solution that uses a vector index as the ID number to represent Geant volume name. 
 
 * The ID number values are dependent on the order of ID number requests. For example, the first Geant volume name gets ID of 0. The second distinct volume name will get ID of 1, and so on. 
-* Because the ID to volume name table depends on the order of that the Geant volumes are presented, the table in different files will be different (e.g. a volume in file A will have a different ID number than the same volume has in volume B).
-* Aggregation of the table from the same run, subrun in different files is impossible.
+* Because the ID to volume name table depends on the order that the Geant volumes are presented, the table in different files will be different (e.g. a volume in file A will have a different ID number than the same volume has in volume B).
+* Aggregation of the table from the same run in different files is impossible.
 
 The latter point is a major problem. 
 
