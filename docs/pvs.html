@@ -11,7 +11,7 @@
 
 <meta name="author" content="Adam Lyon (FNAL)" />
 
-<meta name="date" content="2017-05-22" />
+<meta name="date" content="2017-05-23" />
 
 <title>The New Physical Volume Store</title>
 
@@ -158,10 +158,10 @@ $(document).ready(function () {
 <h1 class="title toc-ignore">The New Physical Volume Store</h1>
 <h3 class="subtitle"><em>…and how not to write unreadable files</em></h3>
 <h4 class="author"><em>Adam Lyon (FNAL)</em></h4>
-<h4 class="date"><em>22 May 2017</em></h4>
+<h4 class="date"><em>23 May 2017</em></h4>
 <div class="abstract">
 <p class="abstract">Abstract</p>
-<p>This document details the changes to the Physical Volume Store and releated classes in <code>artg4</code>. These changes are discussed as well as the schema evolution necessary to maintain backwards compatibility with old files. Aggregation code for reading a file that was produced by merging input files will be shown. Finally, there are some nuances with merging files that must be respected – event numbers must not overlap. That problem is explained and some solutions are given.</p>
+<p>This document details the changes to the Physical Volume Store and releated classes in <code>artg4</code>. These changes are discussed as well as the schema evolution necessary to maintain backwards compatibility with old files. Aggregation code for reading a file that was produced by merging input files will also be shown. Furthermore, there are some nuances with merging files that must be respected – event numbers must not overlap. That problem is explained and some solutions are given. The document ends with covering the testing procedure.</p>
 </div>
 
 </div>
@@ -169,7 +169,7 @@ $(document).ready(function () {
 
 <div id="introduction" class="section level1">
 <h1><span class="header-section-number">1</span> Introduction</h1>
-<p>The <code>gm2ringsim</code> Geant simulation for the Muon g-2 apparatus consists of several thousand volumes, each with a name. Some of the names are rather long, like <code>VacuumChamberCadMeshWallPV[06]</code> and <code>SingleStrawPV - 18 ~ 4 ~ 1 ~ 1 ~ 14</code>. Many of our hit and track data products record the volume that was involved in the particular interaction. Such information is useful in many studies, such as determining the effects of materials. One could save the volume name in these data products, but that would make their memory and disk footprint large. Furthermore, since many volumes are hit many times, it means that some strings would be repeated often. Root compression likely keeps the disk footprint small, but once loaded into memory the memory needed could get to be large. An obvious solution is to assign an identification label (preferably in a small number of bytes) to each volume name and store the ID value in the hit and track data products. There must also be a mapping table stored somewhere in order to translate the IDs back into the strings for analysis. This table is called the <em>Physical Volume Store</em>.</p>
+<p>The <code>gm2ringsim</code> Geant simulation for the Muon g-2 apparatus consists of several thousand volumes, each with a name. Some of the names are rather long, like <code>VacuumChamberCadMeshWallPV[06]</code> and <code>SingleStrawPV - 18 ~ 4 ~ 1 ~ 1 ~ 14</code>. Many of our hit and track data products record the volume that was involved in the particular interaction. Such information is useful in many studies, such as determining the effects of materials. One could save the volume name in these data products, but that would make their memory and disk footprint large. Furthermore, since many volumes are hit many times, it means that some strings would be repeated often. Root compression likely keeps the disk footprint manageable, but once loaded into memory the memory needed could grow to be large. An obvious solution is to assign an identification label, preferably in a small number of bytes, to each volume name and store the ID value in the hit and track data products. There must also be a mapping table stored somewhere in order to translate the IDs back into the strings for analysis. This table is called the <em>Physical Volume Store</em>.</p>
 </div>
 <div id="old-solution" class="section level1">
 <h1><span class="header-section-number">2</span> Old solution</h1>
@@ -180,21 +180,21 @@ $(document).ready(function () {
 <li>If the name does not exist, push back the name into the vector and return the new index for that name as the ID number.</li>
 <li>The calling code then writes the ID number into the data product to represent the volume name.</li>
 </ol>
-<p>The ID to volume name table is simply a vector of strings. The index of the string is the ID number that gets stored in the hit and track data products. For using the IDs, there is a service with a function that can take the ID number and look up the string from the vector. This vector is stored into the <em>art</em> Run record. See below for the relevant code.</p>
+<p>The ID to volume name table is simply a vector of strings. The index of the string in the vector is the ID number that gets stored in the hit and track data products. For using the IDs, there is a service with a function that can take the ID number and look up the string from the vector. This vector is stored into the <em>art</em> Run record. See below for the relevant code.</p>
 <div id="problems-with-the-old-solution" class="section level2">
 <h2><span class="header-section-number">2.1</span> Problems with the old solution</h2>
-<p>There are several problems with this old solution that uses a vector index as the ID number to represent Geant volume name.</p>
+<p>There are several problems with this old solution that uses a vector index as the ID number to represent a Geant volume name.</p>
 <ul>
 <li>The ID number values are dependent on the order of ID number requests. For example, the first Geant volume name gets ID of 0. The second distinct volume name will get ID of 1, and so on.</li>
 <li>Because the ID to volume name table depends on the order that the Geant volumes are presented, the table in different files will be different (e.g. a volume in file A will have a different ID number than the same volume has in volume B).</li>
-<li>Aggregation of the table from the same run in different files is impossible.</li>
+<li>The situation above means that aggregation of the table from the same run in different files is impossible.</li>
 </ul>
 <p>The latter point is a major problem.</p>
 </div>
 <div id="old-solution-c-code" class="section level2">
 <h2><span class="header-section-number">2.2</span> Old solution C++ code</h2>
-<p>The C++ code consists of several key parts (we’ll look at )</p>
-<p>There is a <code>artg4::PhysicalVolumeStoreService</code> that deals with storing the ID to volume name string table. It is also responsible for determining IDs and adding new ones to the table. See below and <a href="https://redmine.fnal.gov/redmine/projects/artg4/repository/revisions/33d5/entry/pluginActions/physicalVolumeStore/physicalVolumeStore_service.hh">here</a>,</p>
+<p>The C++ code consists of several key parts.</p>
+<p>There is a <code>artg4::PhysicalVolumeStoreService</code> that deals with creating the ID to volume name string table by determining IDs and adding new ones to the table. See below and <a href="https://redmine.fnal.gov/redmine/projects/artg4/repository/revisions/33d5/entry/pluginActions/physicalVolumeStore/physicalVolumeStore_service.hh">here</a> for the full file,</p>
 <div class="sourceCode"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span class="co">// artg4/pluginActions/physicalVolumeStore/physicalVolumeStoreService.hh  (partial listing)</span>
 <span class="kw">namespace</span> artg4 {
 
@@ -215,7 +215,7 @@ $(document).ready(function () {
     
     <span class="kw">private</span>:
     
-      <span class="co">// The map</span>
+      <span class="co">// The table</span>
       std::unique_ptr&lt;artg4::PhysicalVolumeStoreData&gt; pvs_;
       
       <span class="co">// ...</span></code></pre></div>
@@ -227,7 +227,7 @@ $(document).ready(function () {
   <span class="co">// Determine the id</span>
   <span class="kw">return</span> pvs_-&gt;idGivenString( pvptr-&gt;GetName() );
 }</code></pre></div>
-<p>As seen above, users call <code>artg4::idGivenPhysicalVolme</code> first gets the name from the volume and passes that to the physical volume store data object. Let’s look at that code (see <a href="https://redmine.fnal.gov/redmine/projects/artg4/repository/revisions/33d5/entry/pluginActions/physicalVolumeStore/PhysicalVolumeStoreData.hh">here</a> )</p>
+<p>As seen above, users call <code>artg4::idGivenPhysicalVolume</code>. That code first gets the name from the volume and passes that to the physical volume store data object. Let’s look at that code (see <a href="https://redmine.fnal.gov/redmine/projects/artg4/repository/revisions/33d5/entry/pluginActions/physicalVolumeStore/PhysicalVolumeStoreData.hh">here</a> )</p>
 <div class="sourceCode"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span class="co">// artg4/pluginActions/physicalVolumeStore/PhysicalVolumeStoreData.hh  (partial listing)</span>
 <span class="kw">namespace</span> artg4 {
   <span class="kw">class</span> PhysicalVolumeStoreData {
@@ -247,7 +247,7 @@ $(document).ready(function () {
       StringIDs ids_;
     
     <span class="co">// ...</span></code></pre></div>
-<p>Much of this code forwards to <code>artg4::StringIDs</code> - where the real work happens. Looking at that code (see <a href="https://cdcvs.fnal.gov/redmine/projects/artg4/repository/revisions/33d5/entry/util/StringIDs.hh">here</a> and <a href="https://cdcvs.fnal.gov/redmine/projects/artg4/repository/revisions/33d5/entry/util/StringIDs.cc">here</a>)</p>
+<p>Much of this code forwards to <code>artg4::StringIDs</code> - where the real work happens. The <code>StringIDs</code> code (see <a href="https://cdcvs.fnal.gov/redmine/projects/artg4/repository/revisions/33d5/entry/util/StringIDs.hh">here</a> and <a href="https://cdcvs.fnal.gov/redmine/projects/artg4/repository/revisions/33d5/entry/util/StringIDs.cc">here</a>)</p>
 <div class="sourceCode"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span class="co">// artg4/pluginActions/util/StringIDs.hh  (partial listing)</span>
 <span class="kw">namespace</span> artg4 {
     <span class="kw">class</span> StringIDs {
@@ -314,12 +314,12 @@ $(document).ready(function () {
 </div>
 <div id="new-solution" class="section level1">
 <h1><span class="header-section-number">3</span> New solution</h1>
-<p>A new PhysicalVolumeStore is necessary to fix the deficiencies of the old design, and it will likely be included in the next release (<code>gm2 v7_06_00</code>). The main problem with the old design is that the ID to volume name table is not consistent from file to file. That is a volume in one file may have a different ID compared to that same volume in another file. The solution is to abandon the simple vector of volume names and the use of its index. The replacement is determining a <em>hash</em> value for the volume name string and then storing a map that links the hash values and the string. A <a href="https://en.wikipedia.org/wiki/Hash_function">hash function</a> maps arbitrary sized data (e.g. volume name strings) to data with fixed size (the hash values or IDs in this case). The hash function is deterministic in that for a given string, the same ID is always returned. This feature solves the problems of the old solution, as now a particular volume string always corresponds to the same ID value in every file.</p>
+<p>A new PhysicalVolumeStore is necessary to fix the deficiencies of the old design, and it will likely be included in the next release (<code>gm2 v7_06_00</code>). The main problem with the old design is that the ID to volume name table is not consistent from file to file. That is a volume in one file may have a different ID compared to that same volume in another file. The solution is to abandon the simple vector of volume names and the use of its index. The replacement is determining a <em>hash</em> value for the volume name string and then storing a map that links the hash values and the strings. A <a href="https://en.wikipedia.org/wiki/Hash_function">hash function</a> maps arbitrary sized data (e.g. volume name strings) to data with fixed size (the hash values or IDs in this case). The hash function is deterministic in that for a given string, the same ID is always returned. This feature solves the problems of the old solution, as now a particular volume string always corresponds to the same ID value in every file.</p>
 <p>There are many possible hash functions, including <a href="https://en.wikipedia.org/wiki/Cyclic_redundancy_check">crc</a> and <a href="https://en.wikipedia.org/wiki/MD5">md5</a>. The former returns 32 bit hash values and the latter 128 bit. The larger sized hash values have a lower chance of a hash <em>collision</em>. A collision occurs when, for our case, two different volume name strings resolve to the same hash value. See this nice <a href="http://preshing.com/20110504/hash-collision-probabilities/">article</a> on this subject. We have over 2000 volumes in our Geant description. With a 32 bit hash, the probability of a collision is around 0.1%. While that may seem low, a collision basically breaks everything. For a 64 bit hash, the chance of a collision is between one in a trillion and one in ten trillion - acceptable! C++14 provides an object that can return a 64 bit hash that we will use: <code>std::hash</code>. See this <a href="http://en.cppreference.com/w/cpp/utility/hash">article</a> for more information. So the new workflow is,</p>
 <ol style="list-style-type: decimal">
 <li>Given a Geant volume name string, its 64 bit hash value (ID) is determined with <code>std::hash</code>.</li>
 <li>The ID is then looked up in an std::map (key is the ID and value is the string).</li>
-<li>If the ID is not in the map, then the (ID, volume name string) pair is added.</li>
+<li>If the ID is not in the map, then the <ID, volume name string> pair is added.</li>
 <li>If the ID is found in the map, then the corresponding string is checked to ensure it is identical to the string passed in. If they are not identical, then we have a hash collision and all hope is lost.</li>
 <li>The ID is returned to the calling function to be written into a data product.</li>
 </ol>
@@ -327,7 +327,7 @@ $(document).ready(function () {
 <p>When using a volume ID in a data product, that hash is simply looked up in the map and the corresponding string is returned as the volume name.</p>
 <div id="new-solution-c-code" class="section level2">
 <h2><span class="header-section-number">3.1</span> New solution C++ code</h2>
-<p>The only code with appreciable changes are in <code>StringID</code>.</p>
+<p>The only code with appreciable changes is in <code>StringID</code>.</p>
 <div class="sourceCode"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span class="co">// artg4/pluginActions/util/StringIDs.hh  (partial listing)</span>
 <span class="kw">namespace</span> artg4 {
   <span class="kw">class</span> StringIDs {
@@ -384,7 +384,7 @@ size_t artg4::StringIDs::idGivenString( <span class="dt">const</span> std::strin
 </div>
 <div id="schema-evolution" class="section level2">
 <h2><span class="header-section-number">3.2</span> Schema evolution</h2>
-<p>It is important that code be backwards compatible with old data files. Art, using ROOT’s schema evolution system, can transparently handle minor changes in data products from version to version. For example, if a new version of a data product has a new data memmber, old data files without that data member can still be read in; the missing data member will just have random data. If a data member type changes and it is possible to coerce the old type into the new type then this coercision will happen automatically for old files.</p>
+<p>It is important that code be backwards compatible with old data files. <em>art</em>, using ROOT’s schema evolution system, can transparently handle minor changes in data products from version to version. For example, if a new version of a data product has a new data member, old data files without that data member can still be read in; the missing data member will just have random data. If a data member type changes and it is possible to coerce the old type into the new type, then this coercion will happen automatically for old files.</p>
 <p>Files with the old Physical Volume Store should be readable with the new code. Fortunately, there is no requirement to turn the old IDs into hashes, as doing so would be extremely difficult. We do, however, want the old poor IDs to be used for lookups to get the volume name strings.</p>
 <p>The new <code>artg4::StringIDs</code> has much different internals than the old version of the class. The hit and track data products in old data files that store <code>int</code> for the ID will silently be coerced into <code>size_t</code> for the new code. But there can be no automatic conversion for the <code>artg4::StringIDs</code> themselves. Therefore, schema evolution code is written in <code>classes_def.xml</code>, as shown below.</p>
 <div class="sourceCode"><pre class="sourceCode cpp"><code class="sourceCode cpp">&lt;!-- classes_<span class="er">`</span>def.xml --&gt;
@@ -416,7 +416,7 @@ size_t artg4::StringIDs::idGivenString( <span class="dt">const</span> std::strin
         ]]&gt;
     &lt;/ioread&gt;</code></pre></div>
 <p>See <a href="https://root.cern.ch/root/html/io/DataModelEvolution.html">ROOT’s documentation</a> on schema evolution as well as a nice <a href="https://redmine.fnal.gov/redmine/projects/lardataobj/repository/revisions/develop/entry/lardataobj/RecoBase/classes_def.xml">example</a> from LArSoft.</p>
-<p>The first thing to note is that version identifiers must be assigned and associated with a checksum. The old version had no identifier, so it will be called version 14. The new version will be caled 15. To determine the checksum, you must set up the execution environment for a particular version (e.g. <code>setup gm2 v7_05_00</code> for old and <code>setup gm2 v7_06_00</code> for new). You then tell ROOT to load a data file with the objects in question. You can then ask ROOT for the checksum (see below). Note that ROOT will look up the class definition <strong>from the environment</strong>, not from the file (so if you are in the new <code>v7_06_00</code> and load an old file, you will get a checksum corresponding to the new class). Here is the code</p>
+<p>The first thing to note is that version identifiers must be assigned and associated with a checksum. The old version had no identifier, so it will be called version 14. The new version will be called 15. To determine the checksum, you must set up the execution environment for a particular version (e.g. <code>setup gm2 v7_05_00</code> for old and <code>setup gm2 v7_06_00</code> for new). You then tell ROOT to load a data file with the objects in question. You can then ask ROOT for the checksum (see below). Note that ROOT will look up the class definition <strong>from the environment</strong>, not from the file (so if you are in the new <code>gm2 v7_06_00</code> environment and load an old file, you will get a checksum corresponding to the new class). Here is the code</p>
 <div class="sourceCode"><pre class="sourceCode bash"><code class="sourceCode bash"><span class="co">#!/bin/bash</span>
 <span class="kw">root</span> -b -l -q aFile.art checksum.C</code></pre></div>
 <div class="sourceCode"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span class="co">// checksum.C</span>
@@ -431,13 +431,13 @@ size_t artg4::StringIDs::idGivenString( <span class="dt">const</span> std::strin
 <li><code>targetClass=&quot;artg4::StringIDs&quot;</code> identifies the destination class of the evolution. In this case, it is the same class</li>
 <li><code>target=&quot;hashToStringMap_&quot;</code> identifies the destination member data of the evolution. Note that we do not need to give the type as ROOT can figure it out from the environment.</li>
 <li><code>include=...</code> Include files the C++ needs, e.g. <code>#include &lt;vector&gt;</code></li>
-<li>The code is written within the <code>CDATA</code> (character data) block. <code>onfile.X</code> refers to member <code>X</code> of the old version class (the version that is in the file). Here we see the strings from the old <code>stringVec_</code> are copied into the new <code>hashToStringMap_</code>. So the vector index becomes the hash for lookups (remember, we are not converting to an actual 64 bit hash).</li>
+<li>The code is written within the <code>CDATA</code> (character data) block. <code>onfile.X</code> refers to member <code>X</code> of the old version of the class (the version that is in the file). Here we see the strings from the old <code>stringVec_</code> are copied into the new <code>hashToStringMap_</code>. Therefore, the vector index becomes the hash for lookups (remember, we are not converting to an actual 64 bit hash).</li>
 </ul>
 <p>This schema evolution code will allow old files to be read in by the new code and the volume ID lookups will work. But again - for old files, volume IDs for the same volume name will be different for different files. New Monte Carlo files will need to be produced to take advantage of the new features of the hashed volume names.</p>
 </div>
 <div id="aggregation" class="section level2">
 <h2><span class="header-section-number">3.3</span> Aggregation</h2>
-<p>The new Physical Volume Store solution allows for objects to be aggregated. Aggregation happens when events from the same run are written across more than one file. See <a href="https://cdcvs.fnal.gov/redmine/projects/art/wiki/Run_and_SubRun_products">art’s documentation</a> for more information. A <em>Run record</em> is always written out at the end of the file, regardless of whether or not the run realy ends there. If you then read in those files from that run and write out <em>one</em> output file, <em>art</em> must figure out how to merge (or aggregate) the run data objects for the “merged” output file. <em>art</em> can do some automatic aggregation (see the documentation mentioned above), but it cannot for the physical volume store. Therefore, aggregation code is written into <code>PhysicalVolumeStoreData</code>, shown here…</p>
+<p>The new Physical Volume Store solution allows for objects to be aggregated. Aggregation happens when events from the same run are written across more than one file. See <a href="https://cdcvs.fnal.gov/redmine/projects/art/wiki/Run_and_SubRun_products">art’s documentation</a> for more information. A <em>Run record</em> is always written out at the end of the file, regardless of whether or not the run really ends there. If you then read in those files from that run and write out <em>one</em> output file, <em>art</em> must figure out how to merge (or aggregate) the run data objects for the “merged” output file. <em>art</em> can do some automatic aggregation (see the documentation mentioned above), but it cannot for the physical volume store. Therefore, aggregation code is written into <code>PhysicalVolumeStoreData</code>, shown here…</p>
 <div class="sourceCode"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span class="kw">namespace</span> artg4 {
   <span class="kw">class</span> PhysicalVolumeStoreData {
     <span class="kw">public</span>:
@@ -456,12 +456,12 @@ size_t artg4::StringIDs::idGivenString( <span class="dt">const</span> std::strin
     <span class="kw">private</span>:
       StringIDs ids_;
 <span class="co">// ...</span></code></pre></div>
-<p>The <code>aggregate</code> method simply loops over the hashes in the Physical Volume Store from the other run (<code>other</code>) and adds them to the current run Physical Volume Store by calling <code>idGivenString</code> (the returning hash is not needed). This code will also check for hash collisions. Note that the <code>ids</code> method is shown and simply returns a <code>std::vector</code> of the hash values from the map.</p>
+<p>The <code>aggregate</code> method simply loops over the hashes in the Physical Volume Store from the other run (<code>other</code>) and adds them to the current run Physical Volume Store by calling <code>idGivenString</code> (the returning hash is not needed). This code will also check for hash collisions. Note that the <code>ids</code> method is shown and simply returns a <code>std::vector</code> of the hash values (the keys) from the map.</p>
 </div>
 </div>
 <div id="event-number-overlap-ruins-files" class="section level1">
 <h1><span class="header-section-number">4</span> Event number overlap ruins files</h1>
-<p>The Aggregation section above mentions spreading events from the same run over many files. This situation can happen when you launch run several Monte Carlo jobs producing output with the same run and subrun numbers. If this happens, then the event numbers in the files <strong>MUST NOT OVERLAP</strong>. That is no event number can be repeated across all of the files that have the same run and subrun numbers. That is,</p>
+<p>The Aggregation section above mentions spreading events from the same run over many files. This situation can happen when you launch run several Monte Carlo jobs producing output with the same run and subrun numbers. If this happens, then the event numbers in the files <strong>MUST NOT OVERLAP</strong>. That is no event number can be repeated across all of the files that have the same run and subrun numbers. In table form,</p>
 <table>
 <thead>
 <tr class="header">
@@ -486,7 +486,7 @@ size_t artg4::StringIDs::idGivenString( <span class="dt">const</span> std::strin
 </tr>
 </tbody>
 </table>
-<p>If you produce a file <code>C</code> that is the output from running over <code>A</code> and <code>B</code> <em>in the same job</em> (so 2 files are reduced to 1), that file <code>C</code> will be <strong>unreadable</strong> by <em>art</em> as you will get a overlapping events exception thrown. There is no way to recover from this problem. You can still analyze files <code>A</code> and <code>B</code>, but any output <em>art</em> file that is merging will be useless.</p>
+<p>If you produce a file <code>C</code> that is the output from running over <code>A</code> and <code>B</code> <em>in the same job</em> (so 2 files are reduced to 1), that file <code>C</code> will be <strong>unreadable</strong> by <em>art</em> as you will get a overlapping events exception thrown. There is no way to recover from this problem. You can still analyze files <code>A</code> and <code>B</code>, but any output <em>art</em> file that is merging will be useless. The only use for file <code>C</code> is deletion.</p>
 <p>There are two solutions.</p>
 <div id="non-overlapping-events-solution" class="section level2">
 <h2><span class="header-section-number">4.1</span> Non-overlapping events solution</h2>
@@ -519,7 +519,7 @@ size_t artg4::StringIDs::idGivenString( <span class="dt">const</span> std::strin
 </div>
 <div id="different-subruns-solution" class="section level2">
 <h2><span class="header-section-number">4.2</span> Different subruns solution</h2>
-<p>Specifying differnet subrun numbers will also solve this problem. That is,</p>
+<p>Specifying different subrun numbers will also solve this problem. That is,</p>
 <table>
 <thead>
 <tr class="header">
@@ -548,10 +548,52 @@ size_t artg4::StringIDs::idGivenString( <span class="dt">const</span> std::strin
 <p>As a general rule, it is a good idea to produce all Monte Carlo files with different subrun numbers. Here is an easy way to do that automatically. We assume that <code>myFCL.fcl</code> is the fcl file you want to run…</p>
 <div class="sourceCode"><pre class="sourceCode bash"><code class="sourceCode bash"><span class="co">#!/bin/bash</span>
 <span class="ot">t=$(</span><span class="kw">mktemp</span> /tmp/myFCL_XXXX.fcl<span class="ot">)</span> ; <span class="ot">R=$(</span><span class="kw">date</span> +%s<span class="ot">)</span> ; <span class="kw">cp</span> myFCL.fcl <span class="ot">$t</span> <span class="kw">;</span> <span class="dt">\\</span> 
-        <span class="kw">echo</span> <span class="st">&quot;source.firstSubRun : </span><span class="ot">$R</span><span class="st">&quot;</span> <span class="kw">&gt;&gt;</span> <span class="ot">$t</span> <span class="kw">;</span>  <span class="kw">gm2</span> -c <span class="ot">$t</span>
+        <span class="kw">echo</span> <span class="st">&quot;source.firstSubRun : </span><span class="ot">$R</span><span class="st">&quot;</span> <span class="kw">&gt;&gt;</span> <span class="ot">$t</span> <span class="kw">;</span>  <span class="kw">gm2</span> -c <span class="ot">$t</span> <span class="kw">;</span> <span class="kw">rm</span> -f <span class="ot">$t</span>
 <span class="co"># Note that you can add more options to gm2 like &quot;gm2 -c $t -n 500 -o output.art&quot;</span></code></pre></div>
-<p>This code makes a temporary file. It will also use the date and time in integer form (seconds since unix epoch) as the subrun number. The FCL file to run is copied to the tmp area and is altered to set the subrun number. Then production begins using this new FCL file. Every job will get its own subrun number. You can choose other things other than <code>date</code>, like <code>R=$RANDOM</code> for a truely random integer.</p>
+<p>This mini-script makes a temporary file. It will also use the date and time in integer form (seconds since unix epoch) as the subrun number. The FCL file to run is copied to the tmp area and is altered to set the subrun number. Then production begins using this new FCL file. Every job will get its own subrun number. You can choose other things other than <code>date</code>, like <code>R=$RANDOM</code> for a truly random integer.</p>
 </div>
+</div>
+<div id="testing" class="section level1">
+<h1><span class="header-section-number">5</span> Testing</h1>
+<p>Unit tests for the Physical Volume Store are difficult as the components mentioned in this document are deep in the system. Instead, behavior tests are included in <code>gm2analyses</code>. All of the tests will use the <code>PhysicalVolumeStoreToFile</code> analyzer (in <code>gm2analyses/util</code>) to output the contents of the physical volume store to a comma separated value (csv) file. This analyzer and the three main tests are described below.</p>
+<div id="converting-the-physical-volume-store-to-a-file" class="section level2">
+<h2><span class="header-section-number">5.1</span> Converting the Physical Volume Store to a file</h2>
+<p>The <code>PhysicalVolumeStoreToFile</code> analyzer (in <code>gm2analyses/util</code>) has a <code>beginRun</code> method that extracts the <code>artg4::PhysicalVolumeStoreData</code> object from the event and converts the contents to a comma separated value text file (csv) of the form,</p>
+<pre><code>&lt;ID&gt;,&lt;VOLUME NAME STRING&gt;
+...</code></pre>
+<p>The name of the csv file is of the form <code>filename_runX[_Y].csv</code> where</p>
+<ul>
+<li><code>filename</code> is a parameter of the analyzer (e.g. “out”)</li>
+<li><code>X</code> is the run number encountered</li>
+<li><code>_Y</code> is an <em>optional</em> part that will only appear if the run record appears more than once in the job. This will happen if you are inputting more than one file into the job. For example, say you feed files A and B into your job. Both A and B have run records for run 1. The job will output two csv files, <code>out_run1.csv</code> and <code>out_run1_1.csv</code> corresponding to the physical volume store in files A and B respectively. Had there been a file C with run 1, then you would have gotten <code>out_run1_2.csv</code>.</li>
+</ul>
+<p><strong>WARNING</strong> You should delete all <code>.csv</code> files from your output area before running this analyzer (or be sure to change the filename). Existing csv files with the same filename will mimic seeing the run repeated and you will not get the csv files you want.</p>
+</div>
+<div id="testing-schema-evolution" class="section level2">
+<h2><span class="header-section-number">5.2</span> Testing schema evolution</h2>
+<p>To test the schema evolution code, a small MDC1 art file made with an old version of the Physical Volume Store corresponding to the “old solution” described above was produced and is stored in the <code>gm2analyses/test/data</code> area. That file is processed with the <code>PhysicalVolumeStoreToFile</code> analyzer to produce a csv file. That csv file is than compared against a reference version from a correct processing. The files should match if schema evolution is working.</p>
+</div>
+<div id="testing-round-trip" class="section level2">
+<h2><span class="header-section-number">5.3</span> Testing “round trip”</h2>
+<p>There is no need to test <code>std::hash</code> itself, but we can test the “round trip” of writing out the physical volume store into an art file and reading it back in again later. We generate 50 MDC1 events to an art file. That should give us a Physical Volume Store with a few hundred volumes in it. We then read in the art file and process with the <code>PhysicalVolumeStoreToFile</code> analyzer making a csv file. With a stand-alone C++ program, we then run over each line of the csv file, independently determine the hash from the string, and compare with the stored hash in the csv. The test passes if all of the hash comparisons are successful.</p>
+</div>
+<div id="testing-aggregation" class="section level2">
+<h2><span class="header-section-number">5.4</span> Testing aggregation</h2>
+<p>Testing aggregation is an involved process.</p>
+<p>We make two non-overlapping art files…</p>
+<ul>
+<li>A 50 event MDC1 file is generated under Run 1, Subrun 1</li>
+<li>A 25 event MDC1 file is generated under Run 1, Subrun 1, but the first event starting at 51</li>
+<li>We make csv files for each using the <code>PhysicalVolumeStoreToFile</code> analyzer</li>
+<li>We check that the csv files are different (they should be as different events were produced)</li>
+</ul>
+<p>We then make a “merged” art file by running the <code>PhysicalVolumeStoreToFile</code> analyzer over both files in the same job. The job will produce two csv files (one with <code>_1</code> as the job sees the same run number twice - once in each file). The two csv files are checked to match the respective csv files from processing the input files individually.</p>
+<p>We also process the merged art file produced in the previous step with the analyzer. This job will invoke the aggregation. One csv file will be produced, and it should be the union of the two csv files from processing the input files individually. That situation is tested.</p>
+</div>
+</div>
+<div id="summary" class="section level1">
+<h1><span class="header-section-number">6</span> Summary</h1>
+<p>A new Physical Volume Store is written to make the IDs deterministic and identical for the same volume in different files. This change solves the aggregation problem of the old code. Some notes about how to produce files with the same run number are given. Finally, the tests for the new Physical Volume Store are discussed.</p>
 </div>
 
 
