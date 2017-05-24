@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>The New Physical Volume Store</title>
+    <meta charset="utf-8">
+    <meta name="author" content="Adam Lyon" />
+    <meta name="date" content="2017-05-24" />
+    <link href="libs/remark-css/example.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# The New Physical Volume Store
+## … and how not to write unreadable files
+### Adam Lyon
+### 24 May 2017
+
+---
+
+
+
+
+# What is the Physical Volume Store?
+
+Our simulation has over 2,000 distinct volumes. These volumes have names. The names can be long...
+
+- `VacuumChamberCadMeshWallPV[06]`
+- `SingleStrawPV - 18 ~ 4 ~ 1 ~ 1 ~ 14`
+
+&lt;br&gt;&lt;br&gt;
+
+--
+
+We store volumes in various hit and track data products for many purposes...
+
+- In what volume did a Geant track start or stop?
+- What volumes does a Geant track intersect?
+- What calorimeter crystal did a particle enter?
+- What straw was hit?
+
+---
+
+# What's the problem?
+
+Storing these names in the data products as strings would lead to a large disk&lt;sup&gt;1&lt;/sup&gt; and memory footprint.  
+
+And these names would likely be repeated many times over in the file. 
+
+.footnote[
+[1] Maybe not for disk as Root probably compresses such strings
+]
+
+--
+
+&lt;br/&gt;&lt;br/&gt;
+
+To reduce size and avoid repitition of large strings, store and ID instead of the string itself. Then store a table of the ID to string mapping. 
+
+--
+
+&lt;br/&gt;
+
+This is the **physical volume store**.
+
+---
+class: inverse, center, middle
+
+# The old solution
+
+`gm2 v7_05_00` and earlier
+
+---
+
+# Old solution
+
+The ID is an `int`. The volume name strings are stored in an `std::vector&lt;std::string&gt;`. 
+Code requests an ID from,
+```c++
+artg4::PhysicalVolumeStoreService::idGivenPhysicalVolume
+```
+&lt;br/&gt;
+--
+
+Given the Geant physical volume, the code,
+
+- Gets the volume name
+- Looks up the name in the vector (a map helps here)
+- If the name exists, then return its index in the vector
+- If the name does not exist, `push_back` into the vector and return the new index
+
+--
+
+&lt;br/&gt;
+The vector is stored in the **Run record**
+---
+
+# Problems with the Old Solution
+
+- The ID number you get for a volume depends on when the calling code asked for it. 
+
+- e.g. First volume gets ID 0, second distinct volume gets 1
+
+--
+
+- A particular volume may (likely) have a different ID number in different files. 
+
+--
+
+- Consequences
+  - ID numbers are not "deterministic"
+  - Aggregation (merging Physical Volume Tables) is impossible
+  - Analysis outside of art is difficult (would need a PVS table for each analyzed file)
+  
+--
+
+- The lack of aggregation problem is aggregious (see later)
+
+---
+
+# Old solution code (skipping a lot)
+
+```c++
+// artg4/pluginActions/util/StringIDs.hh  (partial listing)
+namespace artg4 {
+    class StringIDs {
+    public:
+      // ...
+      // Given a string, return the ID and add it to the list
+      unsigned int idGivenString(const std::string &amp; s);
+
+      // Given an ID, return the string
+      const std::string &amp; stringGivenID(unsigned int id) const {
+        return stringVec_.at( id );
+      }
+    
+      // Return the number of entries
+      unsigned int size() const { return stringVec_.size(); }
+    
+    private:
+      // The vector that holds the strings
+      std::vector&lt;std::string&gt; stringVec_;
+    
+      // Auxillary map
+      std::map&lt;std::string, unsigned int&gt; stringToIdMap_;
+```
+
+---
+
+```c++
+// artg4/util/StringIDs.cc  (partial listing)
+
+// Get the ID for a string. If it is not already in the vector, then add it
+unsigned int artg4::StringIDs::idGivenString(const std::string&amp; s) {
+  // Do we already have s?
+  unsigned int val = 0;
+  bool found = false;
+  
+  // If the string vector is not empty, then we have to look in the map
+  if ( ! stringVec_.empty() ) {
+    // Look in the map for the ID number
+    auto mapIter = stringToIdMap_.find(s);
+    if ( mapIter != stringToIdMap_.end() ) {
+      // Found it
+      val = mapIter-&gt;second;
+      found = true;
+    }
+  }
+  
+  if ( ! found ) {
+    // String not found, add it
+    val = stringVec_.size();
+    stringVec_.push_back( s );
+    stringToIdMap_[ s ] = val;
+  }
+  
+  return val;
+}
+
+```
+
+---
+class: inverse, center, middle
+
+# The new solution
+
+`gm2 v7_06_00` and newer (hopefully)
+
+---
+
+# New solution
+
+- Instead of non-deterministic `int` IDs, use a [hash](https://en.wikipedia.org/wiki/Hash_function). 
+
+- A hash takes an abritrary length thing and determines a fixed length representation of that thing
+
+- Examples: [crc](https://en.wikipedia.org/wiki/Cyclic_redundancy_check) - 32 bits, [md5](https://en.wikipedia.org/wiki/MD5) - 128 bits, [sha](https://en.wikipedia.org/wiki/Secure_Hash_Algorithms) - 256 bits
+
+- C++ standard library has `std::hash` that returns a `size_t` of 64 bits. See [reference](http://en.cppreference.com/w/cpp/utility/hash)
+
+- Important not to have a hash collision (two strings resulting in the same hash value). The more bits in your hash, the less chance of collision. 
+
+---
+
+# Hash Collisions
+
+A collision would be a disaster. &lt;br/&gt;
+http://preshing.com/20110504/hash-collision-probabilities/
+
+![](http://preshing.com/images/small-probabilities.png)
+
+---
+
+# New solution
+
+Hash size of 64 bits seems sufficient! All stored IDs need to be changed to `size_t`. 
+
+Getting an ID number...
+
+- Get Geant volune name
+- Determine hash -&gt; ID
+- Look up ID in the `map&lt;size_t, std::string&gt;`
+- If ID is found, check that the string in the map is ths same as the volume name. If not, then collision
+- If ID is not found, add to the map
+- return the ID
+
+---
+
+# New solution code
+
+```c++
+// artg4/util/StringIDs.hh  (partial listing)
+namespace artg4 {
+  class StringIDs {
+    public:
+      // Given a string, return the ID and add it to the list
+      size_t idGivenString(const std::string &amp; s);
+
+      // Given an ID, return the string
+      const std::string &amp; stringGivenID(size_t id) const {
+        return hashToStringMap_.at( id );
+      }
+
+    private:
+      // The map that holds the strings
+      std::map&lt; size_t, std::string&gt; hashToStringMap_;
+
+      // Don't expose the hash to ROOT
+      #ifndef __ROOTCLING__
+      std::hash&lt;std::string&gt; hash_fn_;
+      #endif
+```
+
+---
+
+```c++
+// artg4/util/StringIDs.cc  (partial listing)
+// Get the ID for a string. If it is not already in the vector, then add it
+size_t artg4::StringIDs::idGivenString( const std::string &amp; s ) {
+
+  // Form the hash
+  size_t id = hash_fn_(s);
+
+  // Does this hash already exist in the map?
+  if ( hashToStringMap_.find(id) != hashToStringMap_.end() ) {
+
+    // Check for hash collision (the hashed string does not equal our string)
+    if ( hashToStringMap_[id] != s ) {
+      // HASH COLLISION !!
+      throw cet::exception("artg4::StringIDs") 
+           &lt;&lt; "Hash collision detected!";
+    }
+  }
+  else {
+   // Add to the map
+   hashToStringMap_.emplace(id, s);
+  }
+  return id;
+}
+```
+---
+
+# Schema evolution
+
+The change to `StringIDs` is a breaking change. Old files have the wrong internals. 
+
+__We always want to be able to read old files with new releases__
+
+
+Root has a schema evolution system...
+
+- Old files without new member data will get filled in randomally
+- Old files with member data removed by new release will give zero
+- Where a member has a type change, the type in the old file will be coereced to the new type if possible
+- For big changes, need to write schema evolution code
+
+---
+
+# Schema evolution code
+
+```c++
+&lt;!-- classes_def.xml --&gt;
+&lt;lcgdict&gt;
+    &lt;class name="artg4::StringIDs"   ClassVersion="15"&gt;
+        &lt;version ClassVersion="15"  checksum="1375741644"/&gt;
+        &lt;version ClassVersion="14"  checksum="2137085475"/&gt;
+    &lt;/class&gt;
+    &lt;class name="std::map&lt;size_t, std::string&gt;"/&gt;
+    &lt;class name="art::Wrapper&lt;artg4::StringIDs&gt;"/&gt;
+
+    &lt;!-- Schema evolution rules for artg4::StringIDs --&gt;
+    &lt;!-- version 14 -&gt; 15 --&gt;
+    &lt;ioread
+        version="[-14]"
+        sourceClass="artg4::StringIDs"
+        source="std::vector&lt;std::string&gt; stringVec_"
+        targetClass="artg4::StringIDs"
+        target="hashToStringMap_"
+        include="vector;string;map"&gt;
+```
+
+---
+
+... continued ...
+
+```c++
+  &lt;![CDATA[
+           std::cout &lt;&lt; "WARNING: Converting StringIDs to new " &lt;&lt;
+                        "style but not using hashes " &lt;&lt; 
+                        "- so will not be mergable" &lt;&lt; std::endl;
+           for ( unsigned int i = 0; i &lt; onfile.stringVec_.size() ; 
+                                                               ++i ) {
+             hashToStringMap_[ static_cast&lt;size_t&gt;(i) ] = 
+                                             onfile.stringVec_[i];
+           }
+        ]]&gt;
+    &lt;/ioread&gt;
+```
+
+This schema evolution will make the ID numbers in the old files work with the new code (but will not be hashes). 
+
+---
+
+# Aggregation
+
+A run record is _always_ written when you close a file. What if you store many files with the same run number? What if you load all of those files in the same job and write a __merged__ output?
+
+For the latter, the run records are aggregated. There are rules to do this, but for complicated types you have to write code...
+
+```c++
+namespace artg4 {
+  class PhysicalVolumeStoreData {
+    public:
+      void aggregate(PhysicalVolumeStoreData const &amp; other ) {
+            for ( auto const&amp; anID : other.ids() ) {
+                  idGivenString( other.stringGivenID(anID));
+            }
+      }
+      // Get a vector of ids
+      std::vector&lt;size_t&gt; ids() const { return ids_.ids(); }
+      
+    private:
+      StringIDs ids_;
+```
+---
+
+# Writing bad files
+
+- If you write multiple files with the same Run and subrun numbers...
+- the event ranges __MUST NOT__ overlap
+
+--- 
+
+BAD - a job that merges files "A" and "B" will result in file "C" that will be __unreadable__:
+
+|File|Run|Subrun|Event range|
+|----|---|------|-----------|
+| A  | 1 | 505  |  1-999    |
+| B  | 1 | 505  |  1-999    |
+
+---
+
+# Writing bad files - fixes
+
+GOOD: Different event ranges
+
+|File|Run|Subrun|Event range|
+|----|---|------|-----------|
+| A  | 1 | 505  |  1-999    |
+| B  | 1 | 505  |  1000-1999 |
+
+--- 
+GOOD: Different subrun numbers
+
+|File|Run|Subrun|Event range|
+|----|---|------|-----------|
+| A  | 1 | 505  |  1-999    |
+| B  | 1 | __506__  |  1-999    |
+
+
+
+---
+
+
+# Conclusions
+
+See https://lyon-fnal.github.io/physicalVolumeStorePaper/pvs.html for more detailed information. Will eventually go into DocDB and the release itself. 
+
+Code is out for testing (e-mail to select few for now)
+
+Many good tests!
+    </textarea>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {window.dispatchEvent(new Event('resize'));});</script>
+
+<script type="text/x-mathjax-config">
+MathJax.Hub.Config({
+  tex2jax: {
+    skipTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+  }
+});
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://cdn.bootcss.com/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>

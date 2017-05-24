@@ -143,7 +143,7 @@ namespace artg4 {
 And the implementation file...
 
 ```c++
-// artg4/pluginActions/physicalVolumeStore/PhysicalVolumeStoreData.cc  (partial listing)
+// artg4/pluginActions/util/StringIDs.cc  (partial listing)
 // ...
 
 // Get the ID for a string. If it is not already in the vector, then add it
@@ -204,7 +204,7 @@ When using a volume ID in a data product, that hash is simply looked up in the m
 The only code with appreciable changes is in `StringID`. 
 
 ```c++
-// artg4/pluginActions/util/StringIDs.hh  (partial listing)
+// artg4/util/StringIDs.hh  (partial listing)
 namespace artg4 {
   class StringIDs {
     public:
@@ -235,7 +235,7 @@ namespace artg4 {
 The vector has been replaced with a map with the hash (`size_t`) as the key and the string as the value. `artg4::StringIDs::stringGivenID` looks up the ID (hash) in the map and returns the corresponding string. The implementation file has the code for adding an ID to the map. 
 
 ```c++
-// artg4/pluginActions/util/StringIDs.cc  (partial listing)
+// artg4/util/StringIDs.cc  (partial listing)
 // Get the ID for a string. If it is not already in the vector, then add it
 size_t artg4::StringIDs::idGivenString( const std::string & s ) {
 
@@ -273,7 +273,7 @@ Files with the old Physical Volume Store should be readable with the new code. F
 The new `artg4::StringIDs` has much different internals than the old version of the class. The hit and track data products in old data files that store `int` for the ID will silently be coerced into `size_t` for the new code. But there can be no automatic conversion for the `artg4::StringIDs` themselves. Therefore, schema evolution code is written in `classes_def.xml`, as shown below.
 
 ```c++
-<!-- classes_`def.xml -->
+<!-- classes_def.xml -->
 <lcgdict>
     <class name="artg4::StringIDs"   ClassVersion="15">
         <version ClassVersion="15"  checksum="1375741644"/>
